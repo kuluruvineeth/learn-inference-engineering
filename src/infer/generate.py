@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 import torch
 
+from infer.kv import ContiguousCache
 from infer.model import Model
 from infer.sampling import SamplingParams, sample
 
@@ -48,5 +49,23 @@ def generate_naive(
             seen.extend(new)
         tokens = torch.tensor(seen, device=device)
         return model(tokens, torch.arange(len(seen), device=device))[-1]
+
+    return _loop(step, prompt, params, stop_ids)
+
+
+@torch.inference_mode()
+def generate(
+    model: Model, prompt: list[int], params: SamplingParams, stop_ids: set[int] = frozenset()
+) -> Result:
+    weight = model.lm_head.weight
+    cache = ContiguousCache(
+        model.config, len(prompt) + params.max_tokens, weight.dtype, weight.device
+    )
+
+    def step(new: list[int], position: int) -> torch.Tensor:
+        positions = torch.arange(position, position + len(new), device=weight.device)
+        logits = model(torch.tensor(new, device=weight.device), positions, cache)[-1]
+        cache.advance(len(new))
+        return logits
 
     return _loop(step, prompt, params, stop_ids)
