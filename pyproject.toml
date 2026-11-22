@@ -1,0 +1,36 @@
+[project]
+name = "infer"
+version = "0.1.0"
+description = "One model server, from request to token"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "torch>=2.14", "safetensors>=0.4", "tokenizers>=0.21", "huggingface-hub>=0.30"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "transformers>=5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/infer"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
