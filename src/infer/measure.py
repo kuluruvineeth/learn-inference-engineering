@@ -45,3 +45,32 @@ def op_time(device: str, ops: int = 1000, repeats: int = 10) -> float:
             x.add_(1)
 
     return median_time(chain, device, repeats) / ops
+
+
+def _storages(values) -> set[int]:
+    flat = values if isinstance(values, (list, tuple)) else [values]
+    return {v.untyped_storage().data_ptr() for v in flat if isinstance(v, torch.Tensor)}
+
+
+class OpCounter(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+        self.ops = Counter()
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **(kwargs or {}))
+        inputs = _storages(list(args) + list((kwargs or {}).values()))
+        if not func.is_view and (func._schema.is_mutable or not _storages(out) <= inputs):
+            self.ops[func.overloadpacket.__name__] += 1
+        return out
+
+    @property
+    def total(self) -> int:
+        return sum(self.ops.values())
+
+
+def count_ops(fn) -> OpCounter:
+    counter = OpCounter()
+    with counter:
+        fn()
+    return counter
