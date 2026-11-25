@@ -165,3 +165,31 @@ class PagedCache:
         for seq_id, count in self.batch.entries:
             self.sequences[seq_id].length += count
         self.batch = None
+
+
+@torch.inference_mode()
+def generate_paged(
+    model: Model,
+    prompt: list[int],
+    params: SamplingParams,
+    stop_ids: set[int] = frozenset(),
+    cache: PagedCache | None = None,
+    seq_id: int = 0,
+) -> Result:
+    weight = model.lm_head.weight
+    if cache is None:
+        blocks = 1 + blocks_for(len(prompt) + params.max_tokens, 16)
+        cache = PagedCache(model.config, blocks, 16, weight.dtype, weight.device)
+
+    def step(new: list[int], position: int) -> torch.Tensor:
+        if not cache.reserve(seq_id, len(new)):
+            raise MemoryError(f"no free blocks for sequence {seq_id}")
+        batch = cache.begin([(seq_id, len(new))])
+        logits = model(torch.tensor(new, device=weight.device), batch.positions, cache)[-1]
+        cache.commit()
+        return logits
+
+    try:
+        return _loop(step, prompt, params, stop_ids)
+    finally:
+        cache.release(seq_id)
