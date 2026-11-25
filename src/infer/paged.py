@@ -76,6 +76,13 @@ class Batch:
     last: torch.Tensor
 
 
+def grouped_query_attention(q, keys, values, mask) -> torch.Tensor:
+    sequences, queries, _, dim = q.shape
+    grouped = q.view(sequences, queries, keys.size(1), -1, dim).permute(0, 2, 3, 1, 4)
+    out = F.scaled_dot_product_attention(grouped.flatten(2, 3), keys, values, attn_mask=mask)
+    return out.unflatten(2, (-1, queries)).permute(0, 3, 1, 2, 4).flatten(2, 3)
+
+
 class PagedCache:
     def __init__(
         self,
@@ -142,3 +149,19 @@ class PagedCache:
             last=ends - 1,
         )
         return self.batch
+
+    def attend(self, layer: int, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        batch, k_cache, v_cache = self.batch, self.k[layer], self.v[layer]
+        k_cache.view(-1, *k.shape[1:])[batch.slots] = k
+        v_cache.view(-1, *v.shape[1:])[batch.slots] = v
+        out = torch.empty_like(q)
+        for group in batch.groups:
+            keys = k_cache[group.tables].flatten(1, 2).transpose(1, 2)
+            values = v_cache[group.tables].flatten(1, 2).transpose(1, 2)
+            out[group.rows] = grouped_query_attention(q[group.rows], keys, values, group.mask)
+        return out
+
+    def commit(self) -> None:
+        for seq_id, count in self.batch.entries:
+            self.sequences[seq_id].length += count
+        self.batch = None
