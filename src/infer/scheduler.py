@@ -73,6 +73,14 @@ def newest(candidates: list[Request]) -> Request:
     return max(candidates, key=lambda r: r.admitted)
 
 
+def fewest_output(candidates: list[Request]) -> Request:
+    return min(candidates, key=lambda r: (len(r.outputs), -len(r.prompt)))
+
+
+def most_output(candidates: list[Request]) -> Request:
+    return max(candidates, key=lambda r: len(r.outputs))
+
+
 class Scheduler:
     def __init__(
         self,
@@ -149,6 +157,21 @@ class Scheduler:
             if victim is request:
                 return False
         return True
+
+    def preempt(self, victim: Request) -> None:
+        for entry in [e for e in self.plan if e.request is victim]:
+            self.plan.remove(entry)
+            self.left += entry.count
+            victim.computed -= entry.count
+            victim.in_flight -= 1
+            victim.pending -= entry.sample
+        self.release(victim)
+        self.running.remove(victim)
+        self.waiting.appendleft(victim)
+        self.preemptions += 1
+        victim.preemptions += 1
+        victim.recomputed += victim.computed
+        victim.computed, victim.state = 0, State.WAITING
 
     def take(self, request: Request, count: int) -> None:
         entry = Entry(request, request.computed, count, request.computed + count == request.length)
