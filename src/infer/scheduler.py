@@ -183,3 +183,12 @@ class Scheduler:
         self.release(request)
         self.finished.append(request)
         request.state = State.FINISHED
+
+
+class StaticScheduler(Scheduler):
+    def schedule(self) -> list[Entry]:
+        self.forming = not self.running
+        return super().schedule()
+
+    def admit(self, request: Request) -> bool:
+        return self.forming and super().admit(request)
